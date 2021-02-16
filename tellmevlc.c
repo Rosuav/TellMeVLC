@@ -154,6 +154,7 @@ static int Open(vlc_object_t *this) {
 	intf_sys_t *sys = malloc(sizeof(intf_sys_t));
 	if (!sys) return VLC_ENOMEM;
 	int mainsock = socket(AF_INET6, SOCK_STREAM, 0);
+	setsockopt(mainsock, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int));
 	int port = var_InheritInteger(this, "tellmevlc-port");
 	struct sockaddr_in6 bindto = {AF_INET6, htons(port), 0, in6addr_any, 0};
 	if (bind(mainsock, (struct sockaddr *)&bindto, sizeof(bindto))) {
