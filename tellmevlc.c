@@ -50,11 +50,12 @@ static void *Run(void *this) {
 		poll(sys->sockets, sys->nsock, 5000);
 		if (sys->sockets[0].revents & POLLIN) {
 			int newsock = accept4(sys->sockets[0].fd, 0, 0, SOCK_NONBLOCK); //TODO: Log the source IPs?
-			if (sys->nsock >= MAX_SOCKETS) {close(newsock); continue;}
+			msg_Info(intf, "Accepted new socket [%d]", newsock);
+			if (sys->nsock >= MAX_SOCKETS) {close(newsock); msg_Warn(intf, "Too many connections - discarding"); continue;}
 			sys->writebuf[sys->nsock] = 0;
 			struct pollfd *s = sys->sockets + sys->nsock++;
 			s->fd = newsock;
-			s->events = 0;
+			s->events = s->revents = 0;
 		}
 		struct pollfd *sock = sys->sockets + 1; int n = sys->nsock - 1;
 		while (n--) {
@@ -80,6 +81,7 @@ static void *Run(void *this) {
 				continue;
 			}
 			//Otherwise, assume it has an error.
+			msg_Err(intf, "Probable socket error on fd %d - revents = %X", sock->fd, sock->revents);
 			close(sock->fd);
 			//Dispose of any pending write buffer
 			struct queuedwrite *q = sys->writebuf[sock - sys->sockets];
@@ -103,7 +105,7 @@ struct queuedwrite *queuewrite(const char *data, size_t len) {
 	return q;
 }
 
-void send_to(intf_sys_t *sys, int sockidx, const char *data) {
+void send_to(vlc_object_t *this, intf_sys_t *sys, int sockidx, const char *data) {
 	//TODO: Semaphore this properly
 	if (sockidx < 0 || sockidx >= MAX_SOCKETS) return;
 	size_t len = strlen(data);
@@ -112,13 +114,13 @@ void send_to(intf_sys_t *sys, int sockidx, const char *data) {
 		//Something already queued? Queue this after it.
 		int limit = 10; //Arbitrary.
 		while (limit > 0 && q->next) {--limit; q = q->next;}
-		if (q->next) {close(sys->sockets[sockidx].fd); return;}
+		if (q->next) {close(sys->sockets[sockidx].fd); msg_Err(this, "Too many queued writes [fd=%d]", sys->sockets[sockidx].fd); return;}
 		q->next = queuewrite(data, len);
 		return;
 	}
 	struct pollfd *sock = sys->sockets + sockidx;
 	ssize_t written = write(sock->fd, data, len); //And what is it that we're meant to have wrote? ... Written.
-	if (written < 0) {close(sock->fd); return;} //TODO: Report errors properly.
+	if (written < 0) {msg_Err(this, "%s writing to socket %d", vlc_strerror(errno), sock->fd); close(sock->fd); return;}
 	if (written == (ssize_t)len) return;
 	sys->writebuf[sockidx] = queuewrite(data + written, len - written);
 	sock->events = POLLOUT;
@@ -135,7 +137,7 @@ static int VolumeChanged(vlc_object_t *this, char const *psz_cmd,
 	char buf[64]; snprintf(buf, sizeof(buf), "volume: %d\r\n", volume);
 	intf_sys_t *sys = intf->p_sys;
 	int n = sys->nsock;
-	for (int i = 1; i < n; ++i) send_to(sys, i, buf);
+	for (int i = 1; i < n; ++i) send_to(this, sys, i, buf);
 	return VLC_SUCCESS;
 }
 
