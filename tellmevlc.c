@@ -132,7 +132,7 @@ static int VolumeChanged(vlc_object_t *this, char const *psz_cmd,
 	int volume = (int)(newval.f_float * 100 + 0.5);
 	if (volume < 0) return VLC_SUCCESS; //Seems to give us a -1.0 on shutdown??
 
-	char buf[64]; snprintf(buf, sizeof(buf), "volume: %d\n", volume);
+	char buf[64]; snprintf(buf, sizeof(buf), "volume: %d\r\n", volume);
 	intf_sys_t *sys = intf->p_sys;
 	int n = sys->nsock;
 	for (int i = 1; i < n; ++i) send_to(sys, i, buf);
