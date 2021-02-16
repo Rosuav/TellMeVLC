@@ -152,7 +152,7 @@ static int Open(vlc_object_t *this) {
 	intf_sys_t *sys = malloc(sizeof(intf_sys_t));
 	if (!sys) return VLC_ENOMEM;
 	int mainsock = socket(AF_INET6, SOCK_STREAM, 0);
-	int port = 4221; //TODO: Allow this to be configured
+	int port = var_InheritInteger(this, "tellmevlc-port");
 	struct sockaddr_in6 bindto = {AF_INET6, htons(port), 0, in6addr_any, 0};
 	if (bind(mainsock, (struct sockaddr *)&bindto, sizeof(bindto))) {
 		msg_Err(this, "%s on port %d", vlc_strerror(errno), port);
@@ -182,4 +182,5 @@ vlc_module_begin()
 	set_category(CAT_INTERFACE)
 	set_subcategory(SUBCAT_INTERFACE_CONTROL)
 	set_callbacks(Open, Close)
+	add_integer_with_range("tellmevlc-port", 4221, 1, 65535, "TellMeVLC port", "TCP/IP port number to listen on for notifications", 1)
 vlc_module_end()
