@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #define MODULE_STRING "tellmevlc"
 #include <vlc_common.h>
 #include <vlc_plugin.h>
@@ -6,6 +7,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <errno.h>
+#include <fcntl.h>
 
 #define MAX_SOCKETS 256
 struct intf_sys_t {
@@ -17,9 +19,30 @@ struct intf_sys_t {
 static void *Run(void *this) {
 	intf_thread_t *intf = (intf_thread_t *)this;
 	intf_sys_t *sys = intf->p_sys;
-	while (1) {
-		msg_Info(intf, "Hello, world!");
-		poll(sys->sockets, sys->nsock, -1);
+	msg_Info(intf, "Hello, world!");
+	while (sys->nsock) {
+		poll(sys->sockets, sys->nsock, 5000);
+		if (sys->sockets[0].revents & POLLIN) {
+			int newsock = accept4(sys->sockets[0].fd, 0, 0, SOCK_NONBLOCK); //TODO: Log the source IPs?
+			if (sys->nsock >= MAX_SOCKETS) {close(newsock); continue;}
+			struct pollfd *s = sys->sockets + sys->nsock++;
+			s->fd = newsock;
+			s->events = 0;
+		}
+		struct pollfd *sock = sys->sockets + 1; int n = sys->nsock - 1;
+		while (n--) {
+			if (!sock->revents) {++sock; continue;}
+			if (sock->revents & POLLOUT) {
+				//TODO: Write any queued data
+				sock->events = 0;
+				++sock;
+				continue;
+			}
+			//Otherwise, assume it has an error.
+			close(sock->fd);
+			*sock = sys->sockets[--sys->nsock];
+			//And don't advance the pointer (but continue decrementing the count)
+		}
 	}
 	return 0;
 }
@@ -46,6 +69,7 @@ static int Open(vlc_object_t *this) {
 		return VLC_EGENERIC;
 	}
 	listen(mainsock, 5);
+	fcntl(mainsock, F_SETFL, O_NONBLOCK);
 	sys->sockets[0].fd = mainsock;
 	sys->sockets[0].events = POLLIN;
 	sys->nsock = 1;
