@@ -12,3 +12,10 @@ name will always be ASCII, eg `"volume: 65\r\n"`.
 
 * https://wiki.videolan.org/OutOfTreeCompile/
 * sudo apt install libvlc-dev libvlccore-dev
+* make && sudo make install
+
+In the future, a password may be added. If it is, clients will
+need to first send this password before any notifications will
+be sent. This will also make this mode compatible with HTTP, as
+the client will first send either a password or an HTTP greeting,
+and then perhaps establish a websocket.
