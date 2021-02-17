@@ -26,6 +26,8 @@ a write is attempted on a socket that already has a pending write, it will be
 queued, again in a costly way. If too many writes are queued, the socket will be
 disconnected.
 
+Similarly, nonblocking reads use a very small buffer. Commands must be shorter
+than READ_BUFFER_SIZE to be readable.
 */
 
 struct queuedwrite {
@@ -35,12 +37,54 @@ struct queuedwrite {
 };
 
 #define MAX_SOCKETS 256
+#define READ_BUFFER_SIZE 256
 struct intf_sys_t {
 	vlc_thread_t thread;
 	int nsock; //Will generally be at least 1 (the main socket)
 	struct pollfd sockets[MAX_SOCKETS];
 	struct queuedwrite *writebuf[MAX_SOCKETS];
+	char readbuf[MAX_SOCKETS][READ_BUFFER_SIZE];
+	int read_pending[MAX_SOCKETS];
 };
+
+void handle_command(intf_thread_t *intf, const char *cmd, const char *param) {
+	if (!strcasecmp(cmd, "volume")) {
+		if (*param) {
+			//Set volume
+			int vol = atoi(param);
+			msg_Info(intf, "GOT VOLUME: >>%d<<", vol);
+			//playlist_VolumeSet( p_playlist, i_volume / (float)AOUT_VOLUME_DEFAULT );
+		} else {
+			//TODO: Get volume
+		}
+		return;
+	}
+	//TODO: Respond with an error message
+	msg_Info(intf, "GOT LINE: >>%s %s<<", cmd, param);
+}
+
+int handle_read(intf_thread_t *intf, int idx) {
+	intf_sys_t *sys = intf->p_sys;
+	struct pollfd *sock = sys->sockets + idx;
+	if (sys->read_pending[idx] >= READ_BUFFER_SIZE) {msg_Err(intf, "Line too long on fd %d", sock->fd); return 1;}
+	char *const readbuf = sys->readbuf[idx];
+	ssize_t nread = read(sock->fd, readbuf + sys->read_pending[idx], READ_BUFFER_SIZE - sys->read_pending[idx]);
+	if (nread < 0) {msg_Err(intf, "%s reading from socket %d", vlc_strerror(errno), sock->fd); return 1;}
+	if (!nread) return 0; //Nothing read. Not sure why it showed up in poll(), maybe a race.
+	sys->read_pending[idx] += nread;
+	while (1) {
+		char *const nl = memchr(readbuf, '\n', sys->read_pending[idx]);
+		if (!nl) return 0; //No newline. Wait for more text.
+		*nl = 0;
+		if (nl > readbuf && nl[-1] == '\r') nl[-1] = 0;
+		//The line will either be a single word (the command), or a command, space, parameter(s)
+		char *param = strchr(readbuf, ' ');
+		if (param) *param++ = 0; else param = "";
+		if (!strcasecmp(readbuf, "quit")) return 1; //Let the socket get closed. (TODO: make sure it doesn't feel like an error)
+		handle_command(intf, readbuf, param);
+		memmove(readbuf, nl, sys->read_pending[idx] -= (nl - readbuf));
+	}
+}
 
 static void *Run(void *this) {
 	intf_thread_t *intf = (intf_thread_t *)this;
@@ -53,9 +97,10 @@ static void *Run(void *this) {
 			msg_Info(intf, "Accepted new socket [%d]", newsock);
 			if (sys->nsock >= MAX_SOCKETS) {close(newsock); msg_Warn(intf, "Too many connections - discarding"); continue;}
 			sys->writebuf[sys->nsock] = 0;
+			sys->read_pending[sys->nsock] = 0;
 			struct pollfd *s = sys->sockets + sys->nsock++;
 			s->fd = newsock;
-			s->events = s->revents = 0;
+			s->events = POLLIN; s->revents = 0;
 		}
 		struct pollfd *sock = sys->sockets + 1; int n = sys->nsock - 1;
 		while (n--) {
@@ -76,9 +121,15 @@ static void *Run(void *this) {
 					sys->writebuf[sock - sys->sockets] = next;
 					if (next) {++sock; continue;} //Still more queued.
 				}
-				sock->events = 0;
+				sock->events &= ~POLLOUT;
 				++sock;
 				continue;
+			}
+			if (sock->revents & POLLIN) {
+				if (!handle_read(intf, sock - sys->sockets)) { //or should this index be fundamental and sock not??
+					++sock;
+					continue;
+				}
 			}
 			//Otherwise, assume it has an error.
 			msg_Err(intf, "Probable socket error on fd %d - revents = %X", sock->fd, sock->revents);
@@ -123,7 +174,7 @@ void send_to(vlc_object_t *this, intf_sys_t *sys, int sockidx, const char *data)
 	if (written < 0) {msg_Err(this, "%s writing to socket %d", vlc_strerror(errno), sock->fd); close(sock->fd); return;}
 	if (written == (ssize_t)len) return;
 	sys->writebuf[sockidx] = queuewrite(data + written, len - written);
-	sock->events = POLLOUT;
+	sock->events |= POLLOUT;
 }
 
 static int VolumeChanged(vlc_object_t *this, char const *psz_cmd,
