@@ -10,9 +10,11 @@ inside a file name), it will be escaped in some way. The line
 starts with the name of the thing changed, then a colon; the
 name will always be ASCII, eg `"volume: 65\r\n"`.
 
-* https://wiki.videolan.org/OutOfTreeCompile/
+Dev notes: https://wiki.videolan.org/OutOfTreeCompile/
+
 * sudo apt install libvlc-dev libvlccore-dev
 * make && sudo make install
+* vlc --extraintf tellmevlc
 
 In the future, a password may be added. If it is, clients will
 need to first send this password before any notifications will
