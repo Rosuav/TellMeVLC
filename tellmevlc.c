@@ -53,9 +53,10 @@ void handle_command(intf_thread_t *intf, const char *cmd, const char *param) {
 			//Set volume
 			int vol = atoi(param);
 			msg_Info(intf, "GOT VOLUME: >>%d<<", vol);
-			//playlist_VolumeSet( p_playlist, i_volume / (float)AOUT_VOLUME_DEFAULT );
+			playlist_VolumeSet(pl_Get(intf), vol / 100.0);
+			playlist_MuteSet(pl_Get(intf), !vol);
 		} else {
-			//TODO: Get volume
+			//TODO: Get volume (good for startup - format will be same as a unilateral message)
 		}
 		return;
 	}
@@ -82,7 +83,7 @@ int handle_read(intf_thread_t *intf, int idx) {
 		if (param) *param++ = 0; else param = "";
 		if (!strcasecmp(readbuf, "quit")) return 1; //Let the socket get closed. (TODO: make sure it doesn't feel like an error)
 		handle_command(intf, readbuf, param);
-		memmove(readbuf, nl, sys->read_pending[idx] -= (nl - readbuf));
+		memmove(readbuf, nl + 1, sys->read_pending[idx] -= (nl - readbuf + 1));
 	}
 }
 
