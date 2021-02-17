@@ -47,16 +47,48 @@ struct intf_sys_t {
 	int read_pending[MAX_SOCKETS];
 };
 
-void handle_command(intf_thread_t *intf, const char *cmd, const char *param) {
+struct queuedwrite *queuewrite(const char *data, size_t len) {
+	struct queuedwrite *q = malloc(sizeof(struct queuedwrite) + len);
+	q->next = 0;
+	q->len = len;
+	strcpy(q->data, data);
+	return q;
+}
+
+void send_to(vlc_object_t *this, intf_sys_t *sys, int sockidx, const char *data) {
+	//TODO: Semaphore this properly
+	if (sockidx < 0 || sockidx >= MAX_SOCKETS) return;
+	size_t len = strlen(data);
+	struct queuedwrite *q = sys->writebuf[sockidx];
+	if (q) {
+		//Something already queued? Queue this after it.
+		int limit = 10; //Arbitrary.
+		while (limit > 0 && q->next) {--limit; q = q->next;}
+		if (q->next) {close(sys->sockets[sockidx].fd); msg_Err(this, "Too many queued writes [fd=%d]", sys->sockets[sockidx].fd); return;}
+		q->next = queuewrite(data, len);
+		return;
+	}
+	struct pollfd *sock = sys->sockets + sockidx;
+	ssize_t written = write(sock->fd, data, len); //And what is it that we're meant to have wrote? ... Written.
+	if (written < 0) {msg_Err(this, "%s writing to socket %d", vlc_strerror(errno), sock->fd); close(sock->fd); return;}
+	if (written == (ssize_t)len) return;
+	sys->writebuf[sockidx] = queuewrite(data + written, len - written);
+	sock->events |= POLLOUT;
+}
+
+void handle_command(intf_thread_t *intf, int sockidx, const char *cmd, const char *param) {
 	if (!strcasecmp(cmd, "volume")) {
 		if (*param) {
 			//Set volume
 			int vol = atoi(param);
-			msg_Info(intf, "GOT VOLUME: >>%d<<", vol);
 			playlist_VolumeSet(pl_Get(intf), vol / 100.0);
 			playlist_MuteSet(pl_Get(intf), !vol);
 		} else {
-			//TODO: Get volume (good for startup - format will be same as a unilateral message)
+			//Get volume (good for startup - format is same as a unilateral message)
+			float vol = playlist_VolumeGet(pl_Get(intf));
+			int volume = (int)(vol * 100 + 0.5);
+			char buf[64]; snprintf(buf, sizeof(buf), "volume: %d\r\n", volume);
+			send_to((void *)intf, intf->p_sys, sockidx, buf);
 		}
 		return;
 	}
@@ -64,6 +96,7 @@ void handle_command(intf_thread_t *intf, const char *cmd, const char *param) {
 	msg_Info(intf, "GOT LINE: >>%s %s<<", cmd, param);
 }
 
+//Return 1 to close socket. No error will be reported - if appropriate, do that first.
 int handle_read(intf_thread_t *intf, int idx) {
 	intf_sys_t *sys = intf->p_sys;
 	struct pollfd *sock = sys->sockets + idx;
@@ -81,8 +114,8 @@ int handle_read(intf_thread_t *intf, int idx) {
 		//The line will either be a single word (the command), or a command, space, parameter(s)
 		char *param = strchr(readbuf, ' ');
 		if (param) *param++ = 0; else param = "";
-		if (!strcasecmp(readbuf, "quit")) return 1; //Let the socket get closed. (TODO: make sure it doesn't feel like an error)
-		handle_command(intf, readbuf, param);
+		if (!strcasecmp(readbuf, "quit")) return 1;
+		handle_command(intf, idx, readbuf, param);
 		memmove(readbuf, nl + 1, sys->read_pending[idx] -= (nl - readbuf + 1));
 	}
 }
@@ -90,7 +123,6 @@ int handle_read(intf_thread_t *intf, int idx) {
 static void *Run(void *this) {
 	intf_thread_t *intf = (intf_thread_t *)this;
 	intf_sys_t *sys = intf->p_sys;
-	msg_Info(intf, "Hello, world!");
 	while (sys->nsock) {
 		poll(sys->sockets, sys->nsock, 5000);
 		if (sys->sockets[0].revents & POLLIN) {
@@ -131,9 +163,10 @@ static void *Run(void *this) {
 					++sock;
 					continue;
 				}
+				//If we fall through, close the socket (but without an error message)
 			}
 			//Otherwise, assume it has an error.
-			msg_Err(intf, "Probable socket error on fd %d - revents = %X", sock->fd, sock->revents);
+			else msg_Err(intf, "Probable socket error on fd %d - revents = %X", sock->fd, sock->revents);
 			close(sock->fd);
 			//Dispose of any pending write buffer
 			struct queuedwrite *q = sys->writebuf[sock - sys->sockets];
@@ -147,35 +180,6 @@ static void *Run(void *this) {
 		}
 	}
 	return 0;
-}
-
-struct queuedwrite *queuewrite(const char *data, size_t len) {
-	struct queuedwrite *q = malloc(sizeof(struct queuedwrite) + len);
-	q->next = 0;
-	q->len = len;
-	strcpy(q->data, data);
-	return q;
-}
-
-void send_to(vlc_object_t *this, intf_sys_t *sys, int sockidx, const char *data) {
-	//TODO: Semaphore this properly
-	if (sockidx < 0 || sockidx >= MAX_SOCKETS) return;
-	size_t len = strlen(data);
-	struct queuedwrite *q = sys->writebuf[sockidx];
-	if (q) {
-		//Something already queued? Queue this after it.
-		int limit = 10; //Arbitrary.
-		while (limit > 0 && q->next) {--limit; q = q->next;}
-		if (q->next) {close(sys->sockets[sockidx].fd); msg_Err(this, "Too many queued writes [fd=%d]", sys->sockets[sockidx].fd); return;}
-		q->next = queuewrite(data, len);
-		return;
-	}
-	struct pollfd *sock = sys->sockets + sockidx;
-	ssize_t written = write(sock->fd, data, len); //And what is it that we're meant to have wrote? ... Written.
-	if (written < 0) {msg_Err(this, "%s writing to socket %d", vlc_strerror(errno), sock->fd); close(sock->fd); return;}
-	if (written == (ssize_t)len) return;
-	sys->writebuf[sockidx] = queuewrite(data + written, len - written);
-	sock->events |= POLLOUT;
 }
 
 static int VolumeChanged(vlc_object_t *this, char const *psz_cmd,
