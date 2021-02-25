@@ -189,6 +189,8 @@ static int VolumeChanged(vlc_object_t *this, char const *psz_cmd,
 	intf_thread_t *intf = (intf_thread_t*)data;
 	int volume = (int)(newval.f_float * 100 + 0.5);
 	if (volume < 0) return VLC_SUCCESS; //Seems to give us a -1.0 on shutdown??
+	int oldvol = (int)(oldval.f_float * 100 + 0.5);
+	if (oldvol == volume) return VLC_SUCCESS; //It's the same (within the resolution we're sending), so don't resend
 
 	char buf[64]; snprintf(buf, sizeof(buf), "volume: %d\r\n", volume);
 	intf_sys_t *sys = intf->p_sys;
