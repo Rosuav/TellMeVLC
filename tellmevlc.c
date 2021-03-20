@@ -82,13 +82,23 @@ void handle_command(intf_thread_t *intf, int sockidx, const char *cmd, const cha
 			//Set volume
 			int vol = atoi(param);
 			playlist_VolumeSet(pl_Get(intf), vol / 100.0);
-			playlist_MuteSet(pl_Get(intf), !vol);
 		} else {
 			//Get volume (good for startup - format is same as a unilateral message)
 			float vol = playlist_VolumeGet(pl_Get(intf));
 			int volume = (int)(vol * 100 + 0.5);
 			char buf[64]; snprintf(buf, sizeof(buf), "volume: %d\r\n", volume);
 			send_to((void *)intf, intf->p_sys, sockidx, buf);
+		}
+		return;
+	}
+	if (!strcasecmp(cmd, "mute")) {cmd = "muted"; param = "1";}
+	if (!strcasecmp(cmd, "unmute")) {cmd = "muted"; param = "0";}
+	if (!strcasecmp(cmd, "muted")) {
+		if (*param) {
+			playlist_MuteSet(pl_Get(intf), !!atoi(param));
+		} else {
+			const char *msg = playlist_MuteGet(pl_Get(intf)) ? "muted: 1\r\n" : "muted: 0\r\n";
+			send_to((void *)intf, intf->p_sys, sockidx, msg);
 		}
 		return;
 	}
@@ -199,6 +209,20 @@ static int VolumeChanged(vlc_object_t *this, char const *psz_cmd,
 	return VLC_SUCCESS;
 }
 
+static int MutedChanged(vlc_object_t *this, char const *psz_cmd,
+	vlc_value_t oldval, vlc_value_t newval, void *data)
+{
+	(void)this; VLC_UNUSED(psz_cmd);
+	intf_thread_t *intf = (intf_thread_t*)data;
+	if (oldval.b_bool != newval.b_bool) {
+		const char *msg = newval.b_bool ? "muted: 1\r\n" : "muted: 0\r\n";
+		intf_sys_t *sys = intf->p_sys;
+		int n = sys->nsock;
+		for (int i = 1; i < n; ++i) send_to(this, sys, i, msg);
+	}
+	return VLC_SUCCESS;
+}
+
 static void Close(vlc_object_t *this) {
 	intf_thread_t *intf = (intf_thread_t *)this;
 	intf_sys_t *sys = intf->p_sys;
@@ -229,6 +253,7 @@ static int Open(vlc_object_t *this) {
 	msg_Info(this, "Listening on %d.", port);
 	intf->p_sys = sys;
 	var_AddCallback(pl_Get(intf), "volume", VolumeChanged, intf);
+	var_AddCallback(pl_Get(intf), "mute", MutedChanged, intf);
 	if (vlc_clone(&sys->thread, Run, intf, VLC_THREAD_PRIORITY_LOW)) {
 		Close(this);
 		return VLC_EGENERIC;
