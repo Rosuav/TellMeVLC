@@ -80,13 +80,12 @@ void handle_command(intf_thread_t *intf, int sockidx, const char *cmd, const cha
 	if (!strcasecmp(cmd, "volume")) {
 		if (*param) {
 			//Set volume
-			int vol = atoi(param);
+			float vol = atof(param);
 			playlist_VolumeSet(pl_Get(intf), vol / 100.0);
 		} else {
 			//Get volume (good for startup - format is same as a unilateral message)
 			float vol = playlist_VolumeGet(pl_Get(intf));
-			int volume = (int)(vol * 100 + 0.5);
-			char buf[64]; snprintf(buf, sizeof(buf), "volume: %d\r\n", volume);
+			char buf[64]; snprintf(buf, sizeof(buf), "volume: %f\r\n", vol * 100.0);
 			send_to((void *)intf, intf->p_sys, sockidx, buf);
 		}
 		return;
@@ -197,12 +196,12 @@ static int VolumeChanged(vlc_object_t *this, char const *psz_cmd,
 {
 	(void)this; VLC_UNUSED(psz_cmd); VLC_UNUSED(oldval); VLC_UNUSED(newval);
 	intf_thread_t *intf = (intf_thread_t*)data;
-	int volume = (int)(newval.f_float * 100 + 0.5);
+	float volume = newval.f_float * 100.0;
 	if (volume < 0) return VLC_SUCCESS; //Seems to give us a -1.0 on shutdown??
-	int oldvol = (int)(oldval.f_float * 100 + 0.5);
+	float oldvol = oldval.f_float * 100.0;
 	if (oldvol == volume) return VLC_SUCCESS; //It's the same (within the resolution we're sending), so don't resend
 
-	char buf[64]; snprintf(buf, sizeof(buf), "volume: %d\r\n", volume);
+	char buf[64]; snprintf(buf, sizeof(buf), "volume: %f\r\n", volume);
 	intf_sys_t *sys = intf->p_sys;
 	int n = sys->nsock;
 	for (int i = 1; i < n; ++i) send_to(this, sys, i, buf);
