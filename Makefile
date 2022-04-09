@@ -3,3 +3,5 @@ libtellmevlc_plugin.so: tellmevlc.c
 
 install: libtellmevlc_plugin.so
 	cp $^ `pkg-config vlc-plugin --variable=pluginsdir`/misc/
+	`pkg-config vlc-plugin --variable=pluginsdir`/../vlc-cache-gen `pkg-config vlc-plugin --variable=pluginsdir`
+	
