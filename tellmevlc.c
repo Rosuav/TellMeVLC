@@ -113,7 +113,7 @@ int handle_read(intf_thread_t *intf, int idx) {
 	char *const readbuf = sys->readbuf[idx];
 	ssize_t nread = read(sock->fd, readbuf + sys->read_pending[idx], READ_BUFFER_SIZE - sys->read_pending[idx]);
 	if (nread < 0) {msg_Err(intf, "%s reading from socket %d", vlc_strerror(errno), sock->fd); return 1;}
-	if (!nread) return 0; //Nothing read. Not sure why it showed up in poll(), maybe a race.
+	if (!nread) return 1; //Nothing read. Socket closed at remote end?
 	sys->read_pending[idx] += nread;
 	while (1) {
 		char *const nl = memchr(readbuf, '\n', sys->read_pending[idx]);
