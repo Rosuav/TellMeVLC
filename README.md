@@ -12,9 +12,12 @@ name will always be ASCII, eg `"volume: 65\r\n"`.
 
 Dev notes: https://wiki.videolan.org/OutOfTreeCompile/
 
-* sudo apt install libvlc-dev libvlccore-dev
-* make && sudo make install
-* vlc --extraintf tellmevlc
+* `sudo apt install libvlc-dev libvlccore-dev`
+* `make && sudo make install`
+* `vlc --extraintf tellmevlc`
+* To always run TellMeVLC with VLC, go to Tools -> Preferences, Show settings
+  -> All, Interface -> Control Interfaces, then check Notifications interface.
+  Save and restart VLC.
 
 In the future, a password may be added. If it is, clients will
 need to first send this password before any notifications will
